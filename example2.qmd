@@ -1,0 +1,100 @@
+---
+title: "Module 1: Tabular Data"
+subtitle: "Working with larger-than-RAM data using duckdbfs"
+author: "Joey Zhang"
+format: html
+---
+
+```{r}
+# Set CRAN mirror to avoid prompts
+library(duckdbfs)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+# Remote S3 path to EXIOBASE 3 (Source Cooperative)
+
+duckdbfs::duckdb_secrets(
+    key = "",
+    secret = "",
+    endpoint = "s3.amazonaws.com",
+    region = "us-west-2"
+)
+s3_url <- "s3://us-west-2.opendata.source.coop/youssef-harby/exiobase-3/4588235/parquet/**"
+
+# Open the dataset lazily
+exio <- open_dataset(s3_url)
+
+# View the schema (column names and types) without reading data
+glimpse(exio)
+```
+
+```{r}
+# Get all CO2-related stressors from F_satellite matrix
+co2 <- exio |>
+    filter(matrix == "F_satellite") |>
+    filter(grepl("CO2|carbon dioxide", stressor, ignore.case = TRUE))
+
+co2
+```
+
+identify which regions are the top 5 co2 emitters
+
+```{r}
+co2_top5 <- co2 |>
+    filter(year == 2022) |>
+    group_by(region) |>
+    summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+    collect() |>
+    arrange(desc(total_co2)) |>
+    head(5)
+
+co2_top5
+```
+
+filter the co2 data down to just these top countries, and plot thier total co2 emissions by year
+```{r}
+library(ggplot2)
+
+co2_top5_filtered <- co2 |>
+    filter(region %in% co2_top5$region) |>
+    group_by(region, year) |>
+    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
+    collect()
+co2_top5_filtered
+```
+
+```{r}
+library(ggplot2)
+ggplot(co2_top5_filtered, aes(x = year, y = total_co2, color = region)) +
+    geom_line(linewidth = 1) +
+    labs(title = "Top 5 CO2 Emitters Over Time",
+         x = "Year",
+         y = "Total CO2 Emissions (kg)",
+         color = "Region") 
+ggsave("co2_top5_plot.png",plot=p)
+```
+
+take a look at the early years of the data to see if we can identify the sudden drop pattern in the top 5 emitters
+```{r}
+# Plot early years in detail
+early_years <- co2 |>
+    filter(region %in% co2_top5$region, year >= 1995, year <= 2000) |>
+    group_by(region, year) |>
+    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
+    collect()
+ggplot(early_years, aes(x = year, y = total_co2, color = region)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    labs(
+        title = "CO2 Emissions: Early Years Detail (1995-2000)",
+        subtitle = "Showing the sudden drop pattern",
+        x = "Year",
+        y = "Total CO2 Emissions (kg)",
+        color = "Region"
+    ) 
+    ggsave("co2_early_years_plot.png", plot = last_plot())
+```
+
+
