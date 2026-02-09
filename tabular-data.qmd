@@ -64,6 +64,9 @@ exio |>
 > **Task**: Construct a query to find the top 5 sectors in the US by CO2 emissions in 2022. Remember to check the column names in `exio` to find the appropriate emissions flow.
 
 ```{r}
+
+
+
 # Read in CO2 data from F_satellite matrix for 2022
 co2_data_US22 <- exio |>
     filter(year == 2022, 
