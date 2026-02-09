@@ -1,0 +1,288 @@
+---
+title: "Module 1: Tabular Data"
+subtitle: "Working with larger-than-RAM data using duckdbfs"
+author: "Sarah Sarfaty Epstein"
+format: html
+---
+
+## Setup
+
+```{r}
+library(duckdbfs)
+library(dplyr)
+library(ggplot2)
+install.packages("patchwork")
+```
+
+## Exercise 1: connecting to remote data
+
+We can open the entire dataset without downloading it using `open_dataset()`. The data is hosted on Source Cooperative. The `**` pattern allows recursive scanning of the partitioned parquet files.
+
+```{r}
+# Remote S3 path to EXIOBASE 3 (Source Cooperative)
+
+duckdbfs::duckdb_secrets(
+    key = "",
+    secret = "",
+    endpoint = "s3.amazonaws.com",
+    region = "us-west-2"
+)
+s3_url <- "s3://us-west-2.opendata.source.coop/youssef-harby/exiobase-3/4588235/parquet/**"
+
+# Open the dataset lazily
+exio <- open_dataset(s3_url)
+```
+
+I want to identify data on the C02 production country by country over time. 
+Open the f_satellite matrix table only and give me unique values of the 'stressor' column.
+
+```{r}
+# Get unique values of the stressor column from F_satellite matrix
+exio |>
+  filter(matrix == "F_satellite") |>
+  distinct(stressor) |>
+  collect()
+```
+
+How can I find which stressors are just about C02 (carbon dioxide emissions)?
+
+```{r}
+# Filter stressors containing CO2 or carbon dioxide
+co2 <- exio |>
+  filter(matrix == "F_satellite") |>
+  distinct(stressor) |>
+  filter(grepl("CO2|carbon dioxide", stressor, ignore.case = TRUE)) |>
+  collect()
+
+co2
+```
+
+Identify which regions are the top 5 CO2 emmitters
+
+```{r}
+# Get top 5 CO2 emitting regions using the co2 stressors we identified
+exio |>
+  filter(matrix == "F_satellite") |>
+  filter(stressor %in% local(pull(co2, stressor))) |>
+  group_by(region) |>
+  summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+  arrange(desc(total_co2)) |>
+  head(5) |>
+  collect()
+```
+
+Filter the co2 data down to just these top 5 regions and plot it over the past three years
+
+```{r}
+# Store top 5 regions
+top5_regions <- exio |>
+  filter(matrix == "F_satellite") |>
+  filter(stressor %in% local(pull(co2, stressor))) |>
+  group_by(region) |>
+  summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+  arrange(desc(total_co2)) |>
+  head(5) |>
+  collect() |>
+  pull(region)
+
+# Filter for top 5 regions and plot over all years
+co2_top5 <- exio |>
+  filter(matrix == "F_satellite") |>
+  filter(stressor %in% local(pull(co2, stressor))) |>
+  filter(region %in% local(top5_regions)) |>
+  group_by(region, year) |>
+  summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+  collect()
+
+# Plot
+ggplot(co2_top5, aes(x = year, y = total_co2, color = region)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(title = "CO2 Emissions by Top 5 Regions",
+       x = "Year",
+       y = "Total CO2 Emissions",
+       color = "Region") +
+  theme_minimal()
+```
+
+going back to all regions can you identify any sectors that have had decreasing CO2 emissions over time?
+
+```{r}
+# Calculate CO2 emissions by sector over time
+sector_trends <- exio |>
+  filter(matrix == "F_satellite") |>
+  filter(stressor %in% local(pull(co2, stressor))) |>
+  group_by(sector, year) |>
+  summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+  collect()
+
+# Calculate the change from first to last year for each sector
+sector_changes <- sector_trends |>
+  group_by(sector) |>
+  arrange(year) |>
+  summarize(
+    first_year = first(year),
+    last_year = last(year),
+    first_value = first(total_co2),
+    last_value = last(total_co2),
+    change = last_value - first_value
+  ) |>
+  filter(change < 0) |>
+  arrange(change) |>
+  head(10) |>
+  select(sector, change)
+
+# Display the top 10 sectors with largest decreases
+sector_changes
+
+# Plot these top 10 sectors over time
+top10_sectors <- sector_changes |> pull(sector)
+
+sector_trends_top10 <- sector_trends |>
+  filter(sector %in% top10_sectors)
+
+# Create labels with sector name and change
+labels <- paste0(sector_changes$sector, " (", round(sector_changes$change, 2), ")")
+
+ggplot(sector_trends_top10, aes(x = year, y = total_co2, color = sector)) +
+  geom_line(linewidth = 0.8) +
+  labs(title = "Top 10 Sectors with Largest CO2 Emission Decreases",
+       x = "Year",
+       y = "Total CO2 Emissions",
+       color = "Sector") +
+  scale_color_discrete(labels = labels) +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 7))
+```
+
+in a new plot, make a bar chart of the same information
+
+```{r}
+# Bar chart of the emission decreases
+ggplot(sector_changes, aes(x = reorder(sector, change), y = change)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 10 Sectors: CO2 Emission Decreases",
+       x = "Sector",
+       y = "Emission Decrease") +
+  theme_minimal()
+```
+
+in a new block of code, please analyze the top 5 sectors with emissions decreases in the US ONLY
+
+```{r}
+# Calculate CO2 emissions by sector over time in the US only
+us_sector_trends <- exio |>
+  filter(matrix == "F_satellite") |>
+  filter(stressor %in% local(pull(co2, stressor))) |>
+  filter(region == "US") |>
+  group_by(sector, year) |>
+  summarize(total_co2 = sum(value, na.rm = TRUE)) |>
+  collect()
+
+# Calculate the change from first to last year for each sector in US
+us_sector_changes <- us_sector_trends |>
+  group_by(sector) |>
+  arrange(year) |>
+  summarize(
+    first_year = first(year),
+    last_year = last(year),
+    first_value = first(total_co2),
+    last_value = last(total_co2),
+    change = last_value - first_value
+  ) |>
+  filter(change < 0) |>
+  arrange(change) |>
+  head(5) |>
+  select(sector, change)
+
+# Display the top 5 US sectors with largest decreases
+us_sector_changes
+```
+
+now in a new code block, plot these top 5 sectors in the US
+
+```{r}
+# Plot these top 5 US sectors over time
+us_top5_sectors <- us_sector_changes |> pull(sector)
+
+us_sector_trends_top5 <- us_sector_trends |>
+  filter(sector %in% us_top5_sectors)
+
+# Create labels with sector name and change
+us_labels <- paste0(us_sector_changes$sector, " (", round(us_sector_changes$change, 2), ")")
+
+ggplot(us_sector_trends_top5, aes(x = year, y = total_co2, color = sector)) +
+  geom_line(linewidth = 0.8) +
+  labs(title = "Top 5 US Sectors with Largest CO2 Emission Decreases",
+       x = "Year",
+       y = "Total CO2 Emissions",
+       color = "Sector") +
+  scale_color_discrete(labels = us_labels) +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 7))
+```
+
+can you create a side by side plot of the 5 sectors with largest DECREASE in emissions along side of the 5 sectors with largest INCREASE (all in the US)
+
+```{r}
+# Calculate the change from first to last year for each sector in US (including increases)
+us_all_changes <- us_sector_trends |>
+  group_by(sector) |>
+  arrange(year) |>
+  summarize(
+    first_year = first(year),
+    last_year = last(year),
+    first_value = first(total_co2),
+    last_value = last(total_co2),
+    change = last_value - first_value
+  )
+
+# Top 5 decreasing sectors
+us_decrease <- us_all_changes |>
+  filter(change < 0) |>
+  arrange(change) |>
+  head(5)
+
+# Top 5 increasing sectors
+us_increase <- us_all_changes |>
+  filter(change > 0) |>
+  arrange(desc(change)) |>
+  head(5)
+
+# Plot decreasing sectors
+us_decrease_sectors <- us_decrease |> pull(sector)
+us_trends_decrease <- us_sector_trends |> filter(sector %in% us_decrease_sectors)
+decrease_labels <- paste0(us_decrease$sector, " (", round(us_decrease$change, 2), ")")
+
+p1 <- ggplot(us_trends_decrease, aes(x = year, y = total_co2, color = sector)) +
+  geom_line(linewidth = 0.8) +
+  labs(title = "Top 5 US Sectors: Largest CO2 Emission Decreases",
+       x = "Year",
+       y = "Total CO2 Emissions") +
+  scale_color_discrete(labels = decrease_labels) +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 8), legend.title = element_blank())
+
+# Plot increasing sectors
+us_increase_sectors <- us_increase |> pull(sector)
+us_trends_increase <- us_sector_trends |> filter(sector %in% us_increase_sectors)
+increase_labels <- paste0(us_increase$sector, " (+", round(us_increase$change, 2), ")")
+
+p2 <- ggplot(us_trends_increase, aes(x = year, y = total_co2, color = sector)) +
+  geom_line(linewidth = 0.8) +
+  labs(title = "Top 5 US Sectors: Largest CO2 Emission Increases",
+       x = "Year",
+       y = "Total CO2 Emissions") +
+  scale_color_discrete(labels = increase_labels) +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 8), legend.title = element_blank())
+
+# Arrange side by side
+library(patchwork)
+p1 + p2
+```
+```
+```
+```
+

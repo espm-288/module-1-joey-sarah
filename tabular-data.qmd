@@ -24,6 +24,8 @@ We will be working with [EXIOBASE 3.8.1](https://source.coop/youssef-harby/exiob
 ```{r}
 library(duckdbfs)
 library(dplyr)
+library(ggplot2)
+
 ```
 
 ## Exercise 1: connecting to remote data
@@ -53,25 +55,248 @@ glimpse(exio)
 The dataset is large. We should filter *before* collecting any data into R.
 
 ```{r}
-co_2 <- exio |>
-    filter(year == 2022, 
-           region == "US",
-           matrix == "F_satellite",
-           stressor %like% "%CO2%") |>  # SQL LIKE pattern for any CO2 stressor
+exio |>
+    filter(year == 2022, region == "US") |>
+    head() |> # view the first 6 rows
     collect()
-head(co_2)
 ```
 
 > **Task**: Construct a query to find the top 5 sectors in the US by CO2 emissions in 2022. Remember to check the column names in `exio` to find the appropriate emissions flow.
+
 ```{r}
-co_2_top5 <- co_2 |>
+
+
+
+# Read in CO2 data from F_satellite matrix for 2022
+co2_data_US22 <- exio |>
+    filter(year == 2022, 
+           matrix == "F_satellite",
+           region == "US",
+           grepl("CO2", stressor, ignore.case = TRUE))
+
+# View the CO2 data structure
+glimpse(co2_data_US22)
+
+# Find top 5 sectors in US by CO2 emissions in 2022
+co2_data_US22 |>
     group_by(sector) |>
-    summarize(total_emissions = sum(value, na.rm = TRUE)) |>
-    arrange(desc(total_emissions)) |>
-    slice_head(n = 5) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE),
+              unit = first(unit)) |>
+    arrange(desc(total_co2)) |>
+    head(5) |>
     collect()
-co_2_top5
 ```
 
+## Exercise 3: Top Emitting Countries and Their Most Emitting Sectors
 
+```{r}
+# Read in CO2 data from F_satellite matrix for 2022
+co2_data <- exio |>
+    filter(year == 2022, 
+           matrix == "F_satellite",
+           grepl("CO2", stressor, ignore.case = TRUE))
 
+# Find top 5 emitting countries
+top_5_countries <- co2_data |>
+    group_by(region) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE)) |>
+    arrange(desc(total_co2)) |>
+    head(5) |>
+    collect()
+
+top_5_countries
+
+# For each of the top 5 countries, find their most emitting sector
+co2_data |>
+    filter(region %in% top_5_countries$region) |>
+    group_by(region, sector) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE),
+              unit = first(unit),
+              .groups = "drop") |>
+    group_by(region) |>
+    slice_max(order_by = total_co2, n = 1) |>
+    arrange(desc(total_co2)) |>
+    collect()
+```
+
+## Exercise 4: List of Sectors by Region
+
+```{r}
+# Get list of unique sectors for each region from F_satellite matrix
+sectors_by_region <- exio |>
+    filter(year == 2022, 
+           matrix == "F_satellite") |>
+    select(region, sector) |>
+    distinct() |>
+    arrange(region, sector) |>
+    collect()
+
+# View the result
+sectors_by_region
+
+# Count sectors per region
+sectors_by_region |>
+    group_by(region) |>
+    summarise(n_sectors = n())
+
+# Example: View sectors for a specific region (e.g., US)
+sectors_by_region |>
+    filter(region == "US")
+```
+
+## Exercise 5: Top Emitting Sectors Across Regions
+
+```{r}
+library(ggplot2)
+
+# Find the top emitting sector for each region
+top_sector_by_region <- co2_data |>
+    group_by(region, sector) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
+    group_by(region) |>
+    slice_max(order_by = total_co2, n = 1) |>
+    collect()
+
+# Count how many regions have each sector as their top emitter
+sector_counts <- top_sector_by_region |>
+    group_by(sector) |>
+    summarise(
+        n_regions = n(),
+        regions = paste(region, collapse = ", ")
+    ) |>
+    arrange(desc(n_regions))
+
+# Create visualization
+ggplot(sector_counts, aes(x = reorder(sector, n_regions), y = n_regions, fill = n_regions)) +
+    geom_col(alpha = 0.9) +
+    geom_text(aes(label = paste0(n_regions, ": ", regions)), 
+              hjust = -0.05, size = 3, color = "#333333") +
+    coord_flip() +
+    scale_fill_gradient(low = "#deebf7", high = "#08519c") +
+    labs(
+        title = "Top CO2 Emitting Sectors by Region",
+        subtitle = "Number of regions where each sector is the largest CO2 emitter (2022)",
+        x = NULL,
+        y = "Number of Regions"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+        plot.title = element_text(face = "bold", size = 14, margin = margin(b = 5)),
+        plot.subtitle = element_text(size = 10, color = "#666666", margin = margin(b = 15)),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_line(color = "#e0e0e0", linewidth = 0.3),
+        axis.text.y = element_text(size = 10),
+        plot.margin = margin(15, 15, 15, 15),
+        legend.position = "none"
+    ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.4)))
+```
+
+## Exercise 6: US CO2 Emissions Over Time
+
+```{r}
+# Get US CO2 emissions for all years
+us_emissions_time <- exio |>
+    filter(matrix == "F_satellite",
+           region == "US",
+           grepl("CO2", stressor, ignore.case = TRUE)) |>
+    group_by(year) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE)) |>
+    arrange(year) |>
+    collect()
+
+# Create time series plot
+ggplot(us_emissions_time, aes(x = year, y = total_co2)) +
+    geom_line(color = "#08519c", linewidth = 1.2) +
+    geom_point(color = "#08519c", size = 2.5) +
+    labs(
+        title = "US CO2 Emissions Over Time",
+        subtitle = "Total CO2 emissions from all sectors (1995-2022)\nTop emitting sector throughout period: Electricity by coal",
+        x = "Year",
+        y = "Total CO2 Emissions"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+        plot.title = element_text(face = "bold", size = 14, margin = margin(b = 5)),
+        plot.subtitle = element_text(size = 10, color = "#666666", margin = margin(b = 15)),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#e0e0e0", linewidth = 0.3)
+    ) +
+    scale_x_continuous(breaks = seq(1995, 2022, by = 3))
+```
+
+## Exercise 7: US vs China CO2 Emissions Over Time
+
+```{r}
+# Get CO2 emissions for US and China over time
+us_cn_emissions <- exio |>
+    filter(matrix == "F_satellite",
+           region %in% c("US", "CN"),
+           year >= 1996,
+           grepl("CO2", stressor, ignore.case = TRUE)) |>
+    group_by(year, region) |>
+    summarise(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
+    arrange(year) |>
+    collect()
+
+# Create comparison plot
+ggplot(us_cn_emissions, aes(x = year, y = total_co2, color = region, group = region)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2.5) +
+    scale_color_manual(
+        values = c("US" = "#08519c", "CN" = "#d7301f"),
+        labels = c("US" = "United States", "CN" = "China")
+    ) +
+    labs(
+        title = "US vs China CO2 Emissions Over Time",
+        subtitle = "Total CO2 emissions from all sectors (1996-2022)",
+        x = "Year",
+        y = "Total CO2 Emissions",
+        color = "Region"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+        plot.title = element_text(face = "bold", size = 14, margin = margin(b = 5)),
+        plot.subtitle = element_text(size = 10, color = "#666666", margin = margin(b = 15)),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#e0e0e0", linewidth = 0.3),
+        legend.position = "bottom"
+    ) +
+    scale_x_continuous(breaks = seq(1996, 2022, by = 3))
+```
+
+## Exercise 8: Scope 2 Emissions for Agriculture
+
+```{r}
+# Note: This calculation uses a simplified approach due to data complexity
+# A full Scope 2 calculation would require detailed sectoral linkages
+
+# Get all sectors to see what's available
+cat("Exploring available sectors...\n")
+all_sectors <- exio |>
+    filter(year == 2022, matrix == "F_satellite", region == "US") |>
+    select(sector) |>
+    distinct() |>
+    collect()
+
+# Show agriculture sectors
+ag_sectors <- all_sectors |> 
+    filter(grepl("Paddy|Wheat|Cereal|Vegetable|Fruit|Plant|Cattle|Pig|Poultry|Meat|Dairy|Forestry", sector, ignore.case = TRUE))
+cat("\nAgriculture-related sectors:\n")
+print(head(ag_sectors, 20))
+
+# Show electricity sectors
+elec_sectors <- all_sectors |>
+    filter(grepl("Electricity", sector, ignore.case = TRUE))
+cat("\nElectricity sectors:\n")
+print(elec_sectors)
+
+# Simplified note on Scope 2
+cat("\n\nNote: Full Scope 2 emission calculation requires:\n")
+cat("1. Economic flows from Z matrix (electricity → agriculture)\n")
+cat("2. Emission intensities from F_satellite matrix\n")
+cat("3. Proper sectoral matching and aggregation\n")
+cat("\nThis is computationally intensive for large MRIO datasets.\n")
+cat("Consider using specialized tools like pymrio or exiobase.py for detailed calculations.\n")
+```
