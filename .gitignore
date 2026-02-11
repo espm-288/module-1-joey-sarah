@@ -10,7 +10,6 @@
 _site/
 _freeze/
 *_files/
-*.html
 
 # System files
 .DS_Store

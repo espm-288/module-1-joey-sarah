@@ -34,7 +34,8 @@ glimpse(exio)
 # Get all CO2-related stressors from F_satellite matrix
 co2 <- exio |>
     filter(matrix == "F_satellite") |>
-    filter(grepl("CO2|carbon dioxide", stressor, ignore.case = TRUE))
+    filter(grepl("CO2|carbon dioxide", stressor, ignore.case = TRUE)) |>
+    collect()  # Collect data upfront to avoid connection issues
 
 co2
 ```
@@ -46,7 +47,6 @@ co2_top5 <- co2 |>
     filter(year == 2022) |>
     group_by(region) |>
     summarize(total_co2 = sum(value, na.rm = TRUE)) |>
-    collect() |>
     arrange(desc(total_co2)) |>
     head(5)
 
@@ -60,20 +60,20 @@ library(ggplot2)
 co2_top5_filtered <- co2 |>
     filter(region %in% co2_top5$region) |>
     group_by(region, year) |>
-    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
-    collect()
+    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop")
 co2_top5_filtered
 ```
 
 ```{r}
 library(ggplot2)
-ggplot(co2_top5_filtered, aes(x = year, y = total_co2, color = region)) +
+p <- ggplot(co2_top5_filtered, aes(x = year, y = total_co2, color = region)) +
     geom_line(linewidth = 1) +
     labs(title = "Top 5 CO2 Emitters Over Time",
          x = "Year",
          y = "Total CO2 Emissions (kg)",
          color = "Region") 
 ggsave("co2_top5_plot.png",plot=p)
+p
 ```
 
 take a look at the early years of the data to see if we can identify the sudden drop pattern in the top 5 emitters
@@ -82,8 +82,7 @@ take a look at the early years of the data to see if we can identify the sudden 
 early_years <- co2 |>
     filter(region %in% co2_top5$region, year >= 1995, year <= 2000) |>
     group_by(region, year) |>
-    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop") |>
-    collect()
+    summarize(total_co2 = sum(value, na.rm = TRUE), .groups = "drop")
 ggplot(early_years, aes(x = year, y = total_co2, color = region)) +
     geom_line(linewidth = 1) +
     geom_point(size = 2) +
