@@ -11,7 +11,10 @@ format: html
 library(duckdbfs)
 library(dplyr)
 library(ggplot2)
-install.packages("patchwork")
+if (!require("patchwork", quietly = TRUE)) {
+  install.packages("patchwork", repos = "https://cloud.r-project.org")
+}
+library(patchwork)
 ```
 
 ## Exercise 1: connecting to remote data
