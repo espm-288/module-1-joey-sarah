@@ -2,7 +2,9 @@
 title: "Module 1: Tabular Data"
 subtitle: "Working with larger-than-RAM data using duckdbfs"
 author: "Sarah Sarfaty Epstein"
-format: html
+format:
+  html:
+    embed-resources: true
 ---
 
 ## Setup
