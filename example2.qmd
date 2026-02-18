@@ -1,10 +1,12 @@
----
+quarto install tinytex---
 title: "Module 1: Tabular Data"
 subtitle: "Working with larger-than-RAM data using duckdbfs"
 author: "Joey Zhang"
-format: 
+format:
     html:
         embed-resources: true
+    pdf:
+        documentclass: article
 ---
 
 ```{r}
