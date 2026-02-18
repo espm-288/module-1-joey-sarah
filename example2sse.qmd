@@ -5,6 +5,7 @@ author: "Sarah Sarfaty Epstein"
 format:
   html:
     embed-resources: true
+  pdf: default
 ---
 
 ## Setup
